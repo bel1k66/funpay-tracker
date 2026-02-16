@@ -25,34 +25,64 @@ current = []
 for lot in lots:
     text = lot.get_text(" ", strip=True).lower()
 
-    if "аренда" in text:
-        continue
-    if not any(s in text for s in servers):
-        continue
-    if not any(r in text for r in ranks):
-        continue
-
     link = lot.get("href")
     if not link:
         continue
     lot_id = re.findall(r"\d+", link)[0]
 
-    price_match = re.search(r"(\d[\d\s]+)\s*₽", text)
-    if not price_match:
-        continue
-    price = int(price_match.group(1).replace(" ", ""))
+    # === ЗАХОДИМ ВНУТРЬ ЛОТА ===
+    lot_url = "https://funpay.com" + link
+    detail_r = requests.get(lot_url, headers=headers)
+    detail_soup = BeautifulSoup(detail_r.text, "lxml")
 
-    wr_match = re.search(r"(\d{2})\s*%?\s*(wr|winrate)", text)
-    winrate = int(wr_match.group(1)) if wr_match else None
+    description_block = detail_soup.find("div", class_="tc-desc-text")
+    description_text = description_block.get_text(" ", strip=True).lower() if description_block else ""
 
-    if "emerald" in text or "эмеральд" in text or "изумруд" in text:
-        rank = "emerald"
-    elif "platinum" in text or "платина" in text:
-        rank = "platinum"
-    elif "gold" in text or "золото" in text:
-        rank = "gold"
-    else:
+    full_text = text + " " + description_text
+
+    # === ФИЛЬТРЫ ===
+    if "аренда" in full_text:
         continue
+    if not any(s in full_text for s in servers):
+        continue
+    if not any(r in full_text for r in ranks):
+        continue
+
+
+price_match = re.search(r"(\d[\d\s]+)\s*₽", text)
+if not price_match:
+    continue
+price = int(price_match.group(1).replace(" ", ""))
+
+# === WINRATE ===
+wr_patterns = [
+    r"(\d{2})\s*%?\s*(wr|winrate)",
+    r"(wr)\s*(\d{2})",
+    r"(\d{2})\s*%",
+]
+
+winrate = None
+
+for pattern in wr_patterns:
+    match = re.search(pattern, full_text)
+    if match:
+        nums = re.findall(r"\d{2}", match.group())
+        if nums:
+            value = int(nums[0])
+            if 30 <= value <= 100:
+                winrate = value
+                break
+
+# === RANK ===
+if "emerald" in full_text or "эмеральд" in full_text or "изумруд" in full_text:
+    rank = "emerald"
+elif "platinum" in full_text or "платина" in full_text:
+    rank = "platinum"
+elif "gold" in full_text or "золото" in full_text:
+    rank = "gold"
+else:
+    continue
+
 
     current.append({
         "lot_id": lot_id,
@@ -128,4 +158,5 @@ else:
             f"медиана цены: {median_price} ₽ | "
             f"медиана времени продажи: {median_time} ч"
         )
+
 
