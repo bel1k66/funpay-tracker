@@ -132,28 +132,52 @@ index 0000000000000000000000000000000000000000..98105121ace7b9d0f94ae5a6038cf0ba
 +    return pd.DataFrame(current)
 +
 +
++LIFECYCLE_COLUMNS = ["lot_id", "rank_div", "price", "winrate", "first_seen", "last_seen", "sold"]
++
++
 +def load_lifecycle() -> pd.DataFrame:
 +    if os.path.exists(LIFECYCLE_FILE):
-+        life = pd.read_csv(LIFECYCLE_FILE, parse_dates=["first_seen", "last_seen"])
++        life = pd.read_csv(LIFECYCLE_FILE)
 +    else:
-+        life = pd.DataFrame(
-+            columns=["lot_id", "rank_div", "price", "winrate", "first_seen", "last_seen", "sold"]
-+        )
++        life = pd.DataFrame(columns=LIFECYCLE_COLUMNS)
 +
-+    # Фиксируем тип ID, чтобы сравнения всегда были корректными.
-+    if not life.empty:
-+        life["lot_id"] = life["lot_id"].astype(str)
++    # Миграция старой схемы: rank -> rank_div.
++    if "rank" in life.columns and "rank_div" not in life.columns:
++        life = life.rename(columns={"rank": "rank_div"})
++
++    defaults = {
++        "lot_id": "",
++        "rank_div": pd.NA,
++        "price": pd.NA,
++        "winrate": pd.NA,
++        "first_seen": pd.NaT,
++        "last_seen": pd.NaT,
++        "sold": False,
++    }
++
++    for column in LIFECYCLE_COLUMNS:
++        if column not in life.columns:
++            life[column] = defaults[column]
++
++    # Нормализуем типы и оставляем только целевую схему.
++    life = life[LIFECYCLE_COLUMNS].copy()
++    life["lot_id"] = life["lot_id"].astype("string").fillna("")
++    life["first_seen"] = pd.to_datetime(life["first_seen"], errors="coerce")
++    life["last_seen"] = pd.to_datetime(life["last_seen"], errors="coerce")
++    life["sold"] = life["sold"].fillna(False).astype(bool)
 +
 +    return life
 +
 +
 +def update_lifecycle(current_df: pd.DataFrame, life: pd.DataFrame, now: datetime) -> pd.DataFrame:
++    current_df = current_df.copy()
++    if "lot_id" not in current_df.columns:
++        current_df["lot_id"] = pd.Series(dtype="string")
++    current_df["lot_id"] = current_df["lot_id"].astype("string")
++
 +    if current_df.empty:
 +        life.loc[:, "sold"] = True
-+        return life
-+
-+    current_df = current_df.copy()
-+    current_df["lot_id"] = current_df["lot_id"].astype(str)
++        return life[LIFECYCLE_COLUMNS].copy()
 +
 +    for _, row in current_df.iterrows():
 +        existing_mask = life["lot_id"] == row["lot_id"]
@@ -183,10 +207,12 @@ index 0000000000000000000000000000000000000000..98105121ace7b9d0f94ae5a6038cf0ba
 +    active_ids = set(current_df["lot_id"])
 +    life.loc[~life["lot_id"].isin(active_ids), "sold"] = True
 +
-+    return life
++    return life[LIFECYCLE_COLUMNS].copy()
 +
 +
 +def print_liquidity(life: pd.DataFrame) -> None:
++    life = life[LIFECYCLE_COLUMNS].copy()
++
 +    print("\n=== ЛИКВИДНОСТЬ ПО ДИВИЗИОНАМ ===")
 +
 +    sold_lots = life[life["sold"] == True].copy()  # noqa: E712
@@ -216,7 +242,7 @@ index 0000000000000000000000000000000000000000..98105121ace7b9d0f94ae5a6038cf0ba
 +    life = load_lifecycle()
 +    life = update_lifecycle(current_df, life, now)
 +
-+    life.to_csv(LIFECYCLE_FILE, index=False)
++    life[LIFECYCLE_COLUMNS].to_csv(LIFECYCLE_FILE, index=False)
 +
 +    print(f"\nТекущих лотов: {len(current_df)}")
 +    print(f"Всего в истории: {len(life)}")
