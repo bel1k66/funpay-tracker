@@ -1,4 +1,5 @@
 import os
+import random
 import re
 import time
 from datetime import datetime
@@ -14,7 +15,9 @@ LIST_URL = "https://funpay.com/lots/85/"
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 SERVERS = ["eu west", "euw", "russia", "ru"]
 REQUEST_TIMEOUT = 15
-SLEEP_SECONDS = 0.15
+SLEEP_SECONDS = 0.35
+MAX_RETRIES = 4
+RETRY_BASE_DELAY_SECONDS = 1.0
 
 
 def extract_rank(text: str) -> Optional[str]:
@@ -56,13 +59,41 @@ def extract_winrate(text: str) -> Optional[int]:
 
 
 def _safe_get(session: requests.Session, url: str) -> Optional[str]:
-    try:
-        response = session.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
-        response.raise_for_status()
-        return response.text
-    except requests.RequestException as exc:
-        print(f"[WARN] Не удалось загрузить {url}: {exc}")
-        return None
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            response = session.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
+
+            if response.status_code == 429:
+                retry_after = response.headers.get("Retry-After")
+                try:
+                    wait_seconds = float(retry_after) if retry_after else RETRY_BASE_DELAY_SECONDS * attempt
+                except ValueError:
+                    wait_seconds = RETRY_BASE_DELAY_SECONDS * attempt
+
+                wait_seconds += random.uniform(0, 0.4)
+                print(
+                    f"[WARN] 429 для {url} (попытка {attempt}/{MAX_RETRIES}), "
+                    f"ждём {wait_seconds:.2f} сек"
+                )
+                time.sleep(wait_seconds)
+                continue
+
+            response.raise_for_status()
+            return response.text
+        except requests.RequestException as exc:
+            is_last_attempt = attempt == MAX_RETRIES
+            if is_last_attempt:
+                print(f"[WARN] Не удалось загрузить {url}: {exc}")
+                return None
+
+            wait_seconds = RETRY_BASE_DELAY_SECONDS * attempt + random.uniform(0, 0.4)
+            print(
+                f"[WARN] Ошибка загрузки {url} (попытка {attempt}/{MAX_RETRIES}): {exc}. "
+                f"Повтор через {wait_seconds:.2f} сек"
+            )
+            time.sleep(wait_seconds)
+
+    return None
 
 
 def collect_current_lots(now: datetime) -> pd.DataFrame:
