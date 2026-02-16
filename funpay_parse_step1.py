@@ -42,6 +42,9 @@ for lot in lots:
         continue
     price = int(price_match.group(1).replace(" ", ""))
 
+    wr_match = re.search(r"(\d{2})\s*%?\s*(wr|winrate)", text)
+    winrate = int(wr_match.group(1)) if wr_match else None
+
     if "emerald" in text or "эмеральд" in text or "изумруд" in text:
         rank = "emerald"
     elif "platinum" in text or "платина" in text:
@@ -55,6 +58,7 @@ for lot in lots:
         "lot_id": lot_id,
         "rank": rank,
         "price": price,
+        "winrate": winrate,
         "seen": now
     })
 
@@ -63,7 +67,10 @@ current_df = pd.DataFrame(current)
 if os.path.exists(LIFECYCLE_FILE):
     life = pd.read_csv(LIFECYCLE_FILE, parse_dates=["first_seen", "last_seen"])
 else:
-    life = pd.DataFrame(columns=["lot_id","rank","price","first_seen","last_seen","sold"])
+    life = pd.DataFrame(columns=[
+    "lot_id","rank","price","winrate","first_seen","last_seen","sold"
+])
+
 
 # обновляем существующие лоты
 for _, row in current_df.iterrows():
@@ -74,6 +81,7 @@ for _, row in current_df.iterrows():
             "lot_id": row["lot_id"],
             "rank": row["rank"],
             "price": row["price"],
+            "winrate": row["winrate"],
             "first_seen": now,
             "last_seen": now,
             "sold": False
@@ -120,3 +128,4 @@ else:
             f"медиана цены: {median_price} ₽ | "
             f"медиана времени продажи: {median_time} ч"
         )
+
