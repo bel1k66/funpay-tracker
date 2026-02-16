@@ -64,8 +64,15 @@ for lot in lots:
         continue
     lot_id = re.findall(r"\d+", link)[0]
 
+    if link.startswith("http"):
+    lot_url = link
+else:
+    if link.startswith("http"):
+    lot_url = link
+else:
     lot_url = BASE_URL + link
-    detail_r = requests.get(lot_url, headers=headers)
+
+detail_r = requests.get(lot_url, headers=headers)
     detail_soup = BeautifulSoup(detail_r.text, "lxml")
 
     desc_block = detail_soup.find("div", class_="tc-desc-text")
@@ -158,3 +165,4 @@ else:
             f"цена: {median_price} ₽ | "
             f"время: {median_time} ч"
         )
+
