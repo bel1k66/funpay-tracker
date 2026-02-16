@@ -1,0 +1,10 @@
+{
+  "auto_update_minutes": 15,
+  "request_timeout_connect": 5,
+  "request_timeout_read": 10,
+  "sleep_seconds": 0.2,
+  "max_retries": 2,
+  "retry_base_delay_seconds": 0.6,
+  "max_lots_per_run": 80,
+  "max_runtime_seconds": 120
+}
