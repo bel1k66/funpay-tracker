@@ -52,6 +52,7 @@ for lot in lots:
 price_match = re.search(r"(\d[\d\s]+)\s*₽", text)
 if not price_match:
     continue
+    
 price = int(price_match.group(1).replace(" ", ""))
 
 # === WINRATE ===
@@ -158,5 +159,6 @@ else:
             f"медиана цены: {median_price} ₽ | "
             f"медиана времени продажи: {median_time} ч"
         )
+
 
 
