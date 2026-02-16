@@ -14,10 +14,12 @@ BASE_URL = "https://funpay.com"
 LIST_URL = "https://funpay.com/lots/85/"
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 SERVERS = ["eu west", "euw", "russia", "ru"]
-REQUEST_TIMEOUT = 15
-SLEEP_SECONDS = 0.35
-MAX_RETRIES = 4
-RETRY_BASE_DELAY_SECONDS = 1.0
+REQUEST_TIMEOUT = (5, 10)
+SLEEP_SECONDS = 0.2
+MAX_RETRIES = 2
+RETRY_BASE_DELAY_SECONDS = 0.6
+MAX_LOTS_PER_RUN = 80
+MAX_RUNTIME_SECONDS = 120
 
 
 def extract_rank(text: str) -> Optional[str]:
@@ -99,6 +101,8 @@ def _safe_get(session: requests.Session, url: str) -> Optional[str]:
 def collect_current_lots(now: datetime) -> pd.DataFrame:
     current: List[Dict[str, object]] = []
 
+    started_at = time.monotonic()
+
     with requests.Session() as session:
         listing_html = _safe_get(session, LIST_URL)
         if not listing_html:
@@ -108,6 +112,15 @@ def collect_current_lots(now: datetime) -> pd.DataFrame:
         lots = soup.find_all("a", class_="tc-item")
 
         for lot in lots:
+            if len(current) >= MAX_LOTS_PER_RUN:
+                print(f"[INFO] Достигнут лимит лотов за запуск: {MAX_LOTS_PER_RUN}")
+                break
+
+            elapsed = time.monotonic() - started_at
+            if elapsed >= MAX_RUNTIME_SECONDS:
+                print(f"[INFO] Достигнут лимит времени запуска: {MAX_RUNTIME_SECONDS} сек")
+                break
+
             text = lot.get_text(" ", strip=True).lower()
             link = lot.get("href")
             if not link:
