@@ -4,23 +4,57 @@ import re
 import pandas as pd
 from datetime import datetime
 import os
+import time
 
 LIFECYCLE_FILE = "lot_lifecycle.csv"
 
-url = "https://funpay.com/lots/85/"
+BASE_URL = "https://funpay.com"
+LIST_URL = "https://funpay.com/lots/85/"
+
 headers = {"User-Agent": "Mozilla/5.0"}
 
-r = requests.get(url, headers=headers)
+r = requests.get(LIST_URL, headers=headers)
 soup = BeautifulSoup(r.text, "lxml")
 
 lots = soup.find_all("a", class_="tc-item")
 
 servers = ["eu west", "euw", "russia", "ru"]
-ranks = ["gold", "золото", "platinum", "платина", "emerald", "эмеральд"]
 
 now = datetime.now()
-
 current = []
+
+def extract_rank(text):
+    patterns = [
+        (r"(emerald|эмеральд|изумруд)\s*(\d)", "emerald"),
+        (r"(platinum|платина)\s*(\d)", "platinum"),
+        (r"(gold|золото)\s*(\d)", "gold"),
+    ]
+
+    for pattern, rank in patterns:
+        m = re.search(pattern, text)
+        if m:
+            return f"{rank}_{m.group(2)}"
+
+    return None
+
+
+def extract_winrate(text):
+    wr_patterns = [
+        r"(\d{2})\s*%?\s*(wr|winrate)",
+        r"(wr)\s*(\d{2})",
+        r"(\d{2})\s*%",
+    ]
+
+    for pattern in wr_patterns:
+        match = re.search(pattern, text)
+        if match:
+            nums = re.findall(r"\d{2}", match.group())
+            if nums:
+                val = int(nums[0])
+                if 30 <= val <= 100:
+                    return val
+    return None
+
 
 for lot in lots:
     text = lot.get_text(" ", strip=True).lower()
@@ -30,68 +64,41 @@ for lot in lots:
         continue
     lot_id = re.findall(r"\d+", link)[0]
 
-    # === ЗАХОДИМ ВНУТРЬ ЛОТА ===
-    lot_url = "https://funpay.com" + link
+    lot_url = BASE_URL + link
     detail_r = requests.get(lot_url, headers=headers)
     detail_soup = BeautifulSoup(detail_r.text, "lxml")
 
-    description_block = detail_soup.find("div", class_="tc-desc-text")
-    description_text = description_block.get_text(" ", strip=True).lower() if description_block else ""
+    desc_block = detail_soup.find("div", class_="tc-desc-text")
+    desc_text = desc_block.get_text(" ", strip=True).lower() if desc_block else ""
 
-    full_text = text + " " + description_text
+    full_text = text + " " + desc_text
 
-    # === ФИЛЬТРЫ ===
     if "аренда" in full_text:
         continue
     if not any(s in full_text for s in servers):
         continue
-    if not any(r in full_text for r in ranks):
+
+    rank_div = extract_rank(full_text)
+    if not rank_div:
         continue
 
+    price_match = re.search(r"(\d[\d\s]+)\s*₽", text)
+    if not price_match:
+        continue
+    price = int(price_match.group(1).replace(" ", ""))
 
-price_match = re.search(r"(\d[\d\s]+)\s*₽", text)
-if not price_match:
-    continue
-    
-price = int(price_match.group(1).replace(" ", ""))
-
-# === WINRATE ===
-wr_patterns = [
-    r"(\d{2})\s*%?\s*(wr|winrate)",
-    r"(wr)\s*(\d{2})",
-    r"(\d{2})\s*%",
-]
-
-winrate = None
-
-for pattern in wr_patterns:
-    match = re.search(pattern, full_text)
-    if match:
-        nums = re.findall(r"\d{2}", match.group())
-        if nums:
-            value = int(nums[0])
-            if 30 <= value <= 100:
-                winrate = value
-                break
-
-# === RANK ===
-if "emerald" in full_text or "эмеральд" in full_text or "изумруд" in full_text:
-    rank = "emerald"
-elif "platinum" in full_text or "платина" in full_text:
-    rank = "platinum"
-elif "gold" in full_text or "золото" in full_text:
-    rank = "gold"
-else:
-    continue
-
+    winrate = extract_winrate(full_text)
 
     current.append({
         "lot_id": lot_id,
-        "rank": rank,
+        "rank_div": rank_div,
         "price": price,
         "winrate": winrate,
         "seen": now
     })
+
+    time.sleep(0.15)  # защита от частых запросов
+
 
 current_df = pd.DataFrame(current)
 
@@ -99,18 +106,17 @@ if os.path.exists(LIFECYCLE_FILE):
     life = pd.read_csv(LIFECYCLE_FILE, parse_dates=["first_seen", "last_seen"])
 else:
     life = pd.DataFrame(columns=[
-    "lot_id","rank","price","winrate","first_seen","last_seen","sold"
-])
+        "lot_id","rank_div","price","winrate","first_seen","last_seen","sold"
+    ])
 
 
-# обновляем существующие лоты
 for _, row in current_df.iterrows():
     if row["lot_id"] in life["lot_id"].values:
         life.loc[life["lot_id"] == row["lot_id"], "last_seen"] = now
     else:
         life = pd.concat([life, pd.DataFrame([{
             "lot_id": row["lot_id"],
-            "rank": row["rank"],
+            "rank_div": row["rank_div"],
             "price": row["price"],
             "winrate": row["winrate"],
             "first_seen": now,
@@ -118,47 +124,37 @@ for _, row in current_df.iterrows():
             "sold": False
         }])], ignore_index=True)
 
-# помечаем проданные
+
 active_ids = set(current_df["lot_id"])
 life.loc[~life["lot_id"].isin(active_ids), "sold"] = True
 
 life.to_csv(LIFECYCLE_FILE, index=False)
 
-sold_now = life[(life["sold"] == True) & (life["last_seen"] == now)]
 
 print("\nТекущих лотов:", len(current_df))
 print("Всего в истории:", len(life))
-print("Продано за этот запуск:", len(sold_now))
 
-print("\n=== ОТЧЁТ ПО ЛИКВИДНОСТИ ===")
 
-life["first_seen"] = pd.to_datetime(life["first_seen"])
-life["last_seen"] = pd.to_datetime(life["last_seen"])
+print("\n=== ЛИКВИДНОСТЬ ПО ДИВИЗИОНАМ ===")
 
 sold_lots = life[life["sold"] == True].copy()
 
 if sold_lots.empty:
     print("Продаж пока нет.")
 else:
-    sold_lots["lifetime_hours"] = (
-        sold_lots["last_seen"] - sold_lots["first_seen"]
+    sold_lots["lifetime_h"] = (
+        pd.to_datetime(sold_lots["last_seen"]) -
+        pd.to_datetime(sold_lots["first_seen"])
     ).dt.total_seconds() / 3600
 
-    for rank in ["gold", "platinum", "emerald"]:
-        part = sold_lots[sold_lots["rank"] == rank]
-
-        if part.empty:
-            print(f"{rank}: продаж нет")
-            continue
+    for div in sorted(sold_lots["rank_div"].unique()):
+        part = sold_lots[sold_lots["rank_div"] == div]
 
         median_price = int(part["price"].median())
-        median_time = round(part["lifetime_hours"].median(), 2)
+        median_time = round(part["lifetime_h"].median(), 2)
 
         print(
-            f"{rank.upper()} | продано: {len(part)} | "
-            f"медиана цены: {median_price} ₽ | "
-            f"медиана времени продажи: {median_time} ч"
+            f"{div.upper()} | продано: {len(part)} | "
+            f"цена: {median_price} ₽ | "
+            f"время: {median_time} ч"
         )
-
-
-
