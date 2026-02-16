@@ -1,7 +1,6 @@
 name: FunPay Tracker
 
 on:
-  push:
   schedule:
     - cron: "*/15 * * * *"
   workflow_dispatch:
