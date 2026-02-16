@@ -1,3 +1,4 @@
+import json
 import os
 import random
 import re
@@ -9,17 +10,53 @@ import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 
+CONFIG_FILE = "parser_settings.json"
 LIFECYCLE_FILE = "lot_lifecycle.csv"
 BASE_URL = "https://funpay.com"
 LIST_URL = "https://funpay.com/lots/85/"
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 SERVERS = ["eu west", "euw", "russia", "ru"]
-REQUEST_TIMEOUT = (5, 10)
-SLEEP_SECONDS = 0.2
-MAX_RETRIES = 2
-RETRY_BASE_DELAY_SECONDS = 0.6
-MAX_LOTS_PER_RUN = 80
-MAX_RUNTIME_SECONDS = 120
+
+DEFAULT_SETTINGS = {
+    "auto_update_minutes": 15,
+    "request_timeout_connect": 5,
+    "request_timeout_read": 10,
+    "sleep_seconds": 0.2,
+    "max_retries": 2,
+    "retry_base_delay_seconds": 0.6,
+    "max_lots_per_run": 80,
+    "max_runtime_seconds": 120,
+}
+
+
+def load_settings() -> Dict[str, float]:
+    settings = DEFAULT_SETTINGS.copy()
+
+    if not os.path.exists(CONFIG_FILE):
+        return settings
+
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        if isinstance(raw, dict):
+            settings.update(raw)
+    except (json.JSONDecodeError, OSError) as exc:
+        print(f"[WARN] Не удалось прочитать {CONFIG_FILE}, используются значения по умолчанию: {exc}")
+
+    return settings
+
+
+SETTINGS = load_settings()
+REQUEST_TIMEOUT = (
+    int(SETTINGS["request_timeout_connect"]),
+    int(SETTINGS["request_timeout_read"]),
+)
+SLEEP_SECONDS = float(SETTINGS["sleep_seconds"])
+MAX_RETRIES = int(SETTINGS["max_retries"])
+RETRY_BASE_DELAY_SECONDS = float(SETTINGS["retry_base_delay_seconds"])
+MAX_LOTS_PER_RUN = int(SETTINGS["max_lots_per_run"])
+MAX_RUNTIME_SECONDS = int(SETTINGS["max_runtime_seconds"])
+AUTO_UPDATE_MINUTES = int(SETTINGS["auto_update_minutes"])
 
 ROMAN_TO_INT = {"i": 1, "ii": 2, "iii": 3, "iv": 4}
 DIVISION_WORDS = {
@@ -430,6 +467,7 @@ def main() -> None:
     known_wr = life["winrate"].notna().sum()
     zero_wr = (life["winrate_status"] == "zero_reported").sum()
     print(f"Winrate заполнен: {known_wr}, нулевой/сомнительный: {zero_wr}")
+    print(f"Автообновление в GitHub Actions: каждые {AUTO_UPDATE_MINUTES} мин")
     print_liquidity(life)
 
 
